@@ -38,12 +38,19 @@ public:
 };
 
 // Function Headers
-void detectAndDisplay(Mat frame);
-string type2str(int type);
 void PrincipalComponentsAnalysis(vector<face>& Face, int principalComponents, Mat& eigenFace, Mat& meanFace);
 void projectToEigenspace(Mat input, Mat& output);
-void show(string window_name, Mat image, Mat& display);
-void detectFace(Mat frame);
+void detectFaces(Mat frame, vector<Mat>& candidates);
+
+void fakeButtons();
+void fakeButtons_update();
+
+string type2str(int type);
+
+// Unused functions
+void detectAndDisplay(Mat frame);
+
+void CallBackFunc(int event, int x, int y, int flags, void* userdata);
 
 // Global variables
 String face_cascade_name = "haarcascade_frontalface_alt.xml";
@@ -54,64 +61,84 @@ string window_name = "Capture - Face detection";
 RNG rng(12345);
 
 Mat eigenFace, meanFace;
-Mat display = Mat(Size(1920, 1080), CV_8U, Scalar::all(127));
+Mat display_color = Mat(Size(1920, 1080), CV_8UC3, Scalar::all(127));
 
+Rect Video = Rect(0, 0, 1280, 780);
+Rect detectedFaces = Rect(1400, 0, 100, 0);
+
+bool detect = false;
 
 int main(int argc, const char** argv)
 {
+	namedWindow(window_name, CV_WINDOW_NORMAL);
+	setMouseCallback(window_name, CallBackFunc, NULL);
 
 	/*********************************************************************************
 
-									READ IN DATA
+								READ IN TRAINING DATA
 
 	**********************************************************************************/
 
-	vector<face> Face;
-	vector<String> files;
+	//vector<face> Face;
+	//vector<String> files;
 
-	String folder = "C:\\Users\\Haziq\\Documents\\MATLAB\\att_faces(8x20)"; 
+	//String folder = "C:\\Users\\Haziq\\Documents\\MATLAB\\att_faces(8x20)"; 
 
-	// Read all files in folder
-	glob(folder, files);
+	//// Read training data
+	//glob(folder, files);
 
-	// Store files in Face database
-	for (int i = 0; i < files.size(); ++i)
-	{
-		Mat src = imread(files[i], CV_LOAD_IMAGE_GRAYSCALE);
-		src.convertTo(src, CV_32FC1);
-		Face.push_back(face(src, i / 8 + 1));
-	}
+	//// Store training data
+	//for (int i = 0; i < files.size(); ++i)
+	//{
+	//	Mat src = imread(files[i], CV_LOAD_IMAGE_GRAYSCALE);
+	//	src.convertTo(src, CV_32FC1);
+	//	Face.push_back(face(src, i / 8 + 1));
+	//}
 
-	if (Face.size() == 0) { cout << "Database is empty"; return 0; }
+	//if (Face.size() == 0) { cout << "Database is empty"; return 0; }
 
-	/*********************************************************************************
+	//// -- Read in test data
+	//Mat testImage = imread("C:\\Users\\Haziq\\Documents\\MATLAB\\att_faces\\29.pgm", CV_LOAD_IMAGE_GRAYSCALE);
+	//testImage.copyTo(display(Rect(1200, 0, testImage.cols, testImage.rows)));
+	//testImage.convertTo(testImage, CV_32FC1);
 
-										TRAINING
 
-	**********************************************************************************/
-	
-	// Input  : Faces , no. of eigenvectors to retain
-	// Output : projectedFaces , eigenFaces , meanFace
-	PrincipalComponentsAnalysis(Face, 30, eigenFace, meanFace);
+	///*********************************************************************************
 
-	// Read in test Image
-	Mat testImage = imread("C:\\Users\\Haziq\\Documents\\MATLAB\\att_faces\\9.pgm", CV_LOAD_IMAGE_GRAYSCALE);
-	testImage.copyTo(display(Rect(1200, 0, testImage.cols, testImage.rows)));
-	testImage.convertTo(testImage, CV_32FC1);
-	
-	// Project onto the Eigenspace
-	Mat testImage_compressed;
-	projectToEigenspace(testImage, testImage_compressed);
-	
-	// Compute Nearest Neighbour
-	vector<float> euclideanDist;
-	int result;
-	for (int i = 0; i < Face.size(); i++)	euclideanDist.push_back(norm(testImage_compressed - Face[i].Image_compressed));
-	result = min_element(std::begin(euclideanDist), std::end(euclideanDist)) - euclideanDist.begin();
+	//									TRAIN
 
-	// Display best match
-	Face[result].Image.convertTo(Face[result].Image, CV_8U);
-	Face[result].Image.copyTo(display(Rect(1000, 0, Face[result].Image.cols, Face[result].Image.rows)));
+	//**********************************************************************************/
+	//
+	//// PCA
+	//PrincipalComponentsAnalysis(Face, 30, eigenFace, meanFace);
+
+	//// Project training data onto Eigenspace
+	///*for (int i = 0; i < Face.size(); i++) projectToEigenspace(Face[i].Image, Face[i].Image_compressed);*/
+	//
+	//// Project test data onto the Eigenspace
+	//Mat testImage_compressed;
+	//projectToEigenspace(testImage, testImage_compressed);
+
+	///*********************************************************************************
+
+	//									CLASSIFY
+
+	//**********************************************************************************/
+	//
+	//// Compute Nearest Neighbour
+	//vector<float> euclideanDist;
+	//int result;
+	//for (int i = 0; i < Face.size(); i++)	euclideanDist.push_back(norm(testImage_compressed - Face[i].Image_compressed));
+
+	//// Get index of best match
+	//result = min_element(std::begin(euclideanDist), std::end(euclideanDist)) - euclideanDist.begin();
+
+	//// Display best match
+	//Face[result].Image.convertTo(Face[result].Image, CV_8U);
+	//Face[result].Image.copyTo(display(Rect(1400, 0, Face[result].Image.cols, Face[result].Image.rows)));
+
+	//imshow("lol", display);
+	//waitKey(0);
 
 	/*********************************************************************************
 	
@@ -127,29 +154,63 @@ int main(int argc, const char** argv)
 	if (!eyes_cascade.load(eyes_cascade_name)){ printf("--(!)Error loading\n"); return -1; };
 
 	//-- 2. Read the video stream
-	if (capture.open(0))
+	if (capture.open(1))
 	{
+
+		capture.set(CV_CAP_PROP_FRAME_WIDTH, 1280);
+		capture.set(CV_CAP_PROP_FRAME_HEIGHT, 720);
+
 		while (true)
 		{
-
+			// read in frame
 			capture >> frame;
 
-			//-- 3. Apply the classifier to the frame
 			if (!frame.empty())
 			{
-				// Clear display
-				display = Mat(Size(1920, 1080), CV_8U, Scalar::all(127));
+				// Detect Faces
+				if (detect == true /*&& mode == recognition*/) 
+				{					
+					// Re initialize candidates and clear display
+					vector<Mat> candidates;
+					display_color = Mat(Size(1920, 1080), CV_8UC3, Scalar::all(127));
 
-				// Detect Faces Input - frame Output - Faces
-				detectFace(frame);
+					// Detect faces
+					detectFaces(frame, candidates);
 
-				// Project onto Eigenspace
+					// Display all candidates
+					for (int i = 0; i < candidates.size(); i++) 
+						candidates[i].copyTo(display_color(Rect(0, 0, candidates[i].cols, candidates[i].rows)));
 
-				cvtColor(frame, frame, CV_BGR2GRAY);
-				frame.copyTo(display(Rect(0, 0, frame.cols, frame.rows)));
+					// Project candidates to Eigenspace
+					Mat candidates_compressed;
+					for (int i = 0; i < candidates.size(); i++) projectToEigenspace(candidates[i], candidates_compressed);
 
-				imshow(window_name, display);
-				waitKey(100);
+					// Classify candidates
+
+					// Display best match
+
+					detect = false;
+				}
+
+				else if (detect == true /*&& mode == training*/)
+				{
+					// Re initialize candidates
+					vector<Mat> candidates;
+
+					// Detect faces
+					detectFaces(frame, candidates);
+
+					// Save to file
+
+					// Display - title (captured)
+
+				}
+
+				//cvtColor(frame, frame, CV_BGR2GRAY);
+				frame.copyTo(display_color(Rect(0, 0, frame.cols, frame.rows)));
+
+				imshow(window_name, display_color);
+				waitKey(1);
 			}
 
 			else
@@ -167,14 +228,6 @@ int main(int argc, const char** argv)
 	}
 
 	return 0;
-}
-
-void show(string window_name, Mat image, Mat& display)
-{
-	namedWindow(window_name, WINDOW_FULLSCREEN);
-	image.convertTo(image, CV_8U);
-	image.copyTo(display(Rect(10, 10, image.cols, image.rows)));
-	imshow(window_name, display);
 }
 
 void PrincipalComponentsAnalysis(vector<face>& Face, int principalComponents, Mat& eigenFace, Mat& meanFace)
@@ -219,7 +272,7 @@ void projectToEigenspace(Mat input, Mat& output) {
 
 }
 
-void detectFace(Mat frame) {
+void detectFaces(Mat frame, vector<Mat> &candidates) {
 
 	// Image processing
 	Mat frame_gray;
@@ -230,19 +283,19 @@ void detectFace(Mat frame) {
 	vector<Rect> faces_boundingBox;
 	face_cascade.detectMultiScale(frame_gray, faces_boundingBox, 1.1, 2, 0 | CV_HAAR_SCALE_IMAGE, Size(30, 30));
 
-	cout << faces_boundingBox.size(); 
-
+	// Update candidates
 	for (int i = 0; i < faces_boundingBox.size(); i++)
 	{
-		Mat faceROI = frame_gray(faces_boundingBox[i]);
-		resize(faceROI, faceROI, Size(100, 100));
-		faceROI.copyTo(display(Rect(800, 0, faceROI.cols, faceROI.rows)));
+		Mat face = frame_gray(faces_boundingBox[i]);
+		resize(face, face, Size(100, 100));
+		candidates.push_back(face);
+		//face.copyTo(display_color(Rect(800, 0, faceROI.cols, faceROI.rows)));
 	}
 }
 
 void detectAndDisplay(Mat frame)
 {
-	std::vector<Rect> faces;
+	vector<Rect> faces;
 	Mat frame_gray;
 
 	cvtColor(frame, frame_gray, CV_BGR2GRAY);
@@ -273,6 +326,38 @@ void detectAndDisplay(Mat frame)
 	// Show what you got
 	imshow(window_name, frame);
 	waitKey(1);
+}
+
+void fakeButtons()
+{
+	rectangle(display_color, Rect(0, 800, 200, 100), Scalar(0, 0, 255));
+	putText(display_color, "haha", Point(10, 810), FONT_HERSHEY_SIMPLEX, 3, Scalar(0, 0, 0), 3);
+}
+
+void CallBackFunc(int event, int x, int y, int flags, void* userdata)
+{
+	if (event == EVENT_LBUTTONDOWN)
+	{
+		cout << "Left button of the mouse is clicked - position (" << x << ", " << y << ")" << endl;
+	}
+
+	else if (event == EVENT_RBUTTONDOWN)
+	{
+		cout << "Right button of the mouse is clicked - position (" << x << ", " << y << ")" << endl;
+		detect = true;
+
+	}
+
+	else if (event == EVENT_MBUTTONDOWN)
+	{
+		cout << "Middle button of the mouse is clicked - position (" << x << ", " << y << ")" << endl;
+	}
+
+	else if (event == EVENT_MOUSEMOVE)
+	{
+		cout << "Mouse move over the window - position (" << x << ", " << y << ")" << endl;
+
+	}
 }
 
 string type2str(int type) {
