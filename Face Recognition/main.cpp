@@ -57,11 +57,14 @@ void PrincipalComponentsAnalysis(vector<face>& Face, int principalComponents, Ma
 void projectToEigenspace(Mat input, Mat& output);
 
 // Detection functions
-void detectFaces(Mat frame, vector<Mat> &haarCandidates, vector<Rect>& haarRect);
+void detectFaces(Mat frame, vector<Mat> &haarFaces, vector<Rect>& haarRect);
 
-void locateRotatedFaces(Mat frame, vector<Rect> haarCandidates, Mat tmplate, Point offset);
+void detectRotatedFaces(Mat frame, vector<Rect> haarRect, vector<Mat> &rotatedFaces);
 RotatedRect formRotatedRect(Mat left, Mat right, Mat frame);
 Mat cropRotatedRect(RotatedRect boundingRect, Mat src);
+
+void processContours(vector<vector<Point>> contours, vector<Point>& matches, vector<vector<Point>>& test);
+void updateMatches(vector<Point>& matches, vector<Rect> haarRect = vector<Rect>(), vector<Rect> rotatedRect = vector<Rect>());
 
 // Extra unsused functions
 string type2str(int type);
@@ -110,10 +113,6 @@ int main(int argc, const char** argv)
 		// Resize
 		resize(tmplate, tmplate, Size(), 0.8, 0.8, CV_INTER_CUBIC);
 	}
-
-	cout << tmplates[4] << endl;
-	cout << tmplates[4].size();
-	waitKey(0);
 
 	// Read in Training Data -----
 	vector<face> Face;
@@ -213,40 +212,21 @@ int main(int argc, const char** argv)
 
 					*********************************************************/
 
-					// Detect horizontal faces
-					vector<Mat> haarCandidates;
+					// Detect haar faces
+					vector<Mat> haarFaces;
 					vector<Rect> haarRect;
-					detectFaces(frame, haarCandidates, haarRect);
+					detectFaces(frame, haarFaces, haarRect);
 					
-					// Detect oriented faces 
-					vector<Mat> rotatedCandidates;
+					// Detect rotated faces 
+					vector<Mat> rotatedFaces;
 					vector<Rect> rotatedRect;
-					locateRotatedFaces(frame, haarRect, tmplates[4], offsets[4]);
+					detectRotatedFaces(frame, haarRect, rotatedFaces);
 
 					/********************************************************
 
 											RECOGNITION
 
 					*********************************************************/
-					/*// Project candidates to Eigenspace
-					vector<Mat> candidates_compressed(haarCandidates.size());
-					for (int i = 0; i < haarCandidates.size(); i++)
-						projectToEigenspace(haarCandidates[i], candidates_compressed[i]);
-
-					// Nearest Neighbour Classifier
-					vector<vector<float>> euclideanDist(haarCandidates.size());
-					vector<int> result(haarCandidates.size());
-					
-					for (int i = 0; i < haarCandidates.size(); i++)
-					{
-						for (int j = 0; j < Face.size(); j++)
-							euclideanDist[i].push_back(norm(candidates_compressed[i] - Face[j].Image_compressed));
-
-						// Classify
-						result[i] = min_element(begin(euclideanDist), end(euclideanDist)) - euclideanDist.begin();
-						Face[result[i]].Image.convertTo(Face[result[i]].Image, CV_8U);
-						imshow("L", Face[result[i]].Image);
-					}*/
 									
 					viola_called = true;
 				}
@@ -279,138 +259,232 @@ RotatedRect formRotatedRect(Point lefteye, Point righteye, Mat src) {
 	// 4 corners of the rect
 	Point topLeft, topRight, bottomLeft, bottomRight;
 
-	float theta = ((float)(righteye.y - lefteye.y) / (righteye.x - lefteye.x));
-	float pupillaryDistance	= norm(Mat(lefteye), Mat(righteye), NORM_L2);
+	float theta = atan(((float)(righteye.y - lefteye.y) / (righteye.x - lefteye.x)));
+	float pd	= norm(lefteye - righteye);
 
 	// Compute the 4 corners
-	topLeft.x = lefteye.x - pupillaryDistance*cos(theta) + 0.8 * pupillaryDistance*sin(theta);
-	topLeft.y = lefteye.y - pupillaryDistance*sin(theta) - 0.8 * pupillaryDistance*cos(theta);
+	topLeft.x = lefteye.x - 1 * pd*cos(theta) + 1 * pd*sin(theta);
+	topLeft.y = lefteye.y - 1 * pd*sin(theta) - 1 * pd*cos(theta);
 
-	topRight.x = righteye.x + pupillaryDistance*cos(theta) + 0.8 * pupillaryDistance*sin(theta);
-	topRight.y = righteye.y + pupillaryDistance*sin(theta) - 0.8 * pupillaryDistance*cos(theta);
+	topRight.x = righteye.x + 1 * pd*cos(theta) + 1 * pd*sin(theta);
+	topRight.y = righteye.y + 1 * pd*sin(theta) - 1 * pd*cos(theta);
 
-	bottomLeft.x = topLeft.x - 2 * pupillaryDistance*sin(theta);
-	bottomLeft.y = topLeft.y + 2 * pupillaryDistance*cos(theta);
+	bottomLeft.x = lefteye.x - pd * cos(theta) - 1.5 * pd * sin(theta);
+	bottomLeft.y = lefteye.y - pd * sin(theta) + 1.5 * pd * cos(theta);
 
-	bottomRight.x = topRight.x - 2 * pupillaryDistance*sin(theta);
-	bottomRight.y = topRight.y + 2 * pupillaryDistance*cos(theta);
+	bottomRight.x = righteye.x + pd*cos(theta) - 1.5 * pd * sin(theta);
+	bottomRight.y = righteye.y + pd*sin(theta) + 1.5 * pd * cos(theta);
 
 	// Push
 	vector<Point> rectCorners;
 	rectCorners.push_back(topLeft);
 	rectCorners.push_back(topRight);
-	rectCorners.push_back(bottomRight);
 	rectCorners.push_back(bottomLeft);
+	rectCorners.push_back(bottomRight);
 
 	// Generate the rotated rectangle
 	RotatedRect boundingRect;
 	boundingRect = minAreaRect(Mat(rectCorners));
 
-	Point2f rect_points[4];
-	boundingRect.points(rect_points);
-	
-	for (int j = 0; j < 4; j++)
-		line(src, rect_points[j], rect_points[(j + 1) % 4], CV_RGB(255,0,0), 1, 8);
-
 	return boundingRect;
 }
 
-void locateRotatedFaces(Mat frame, vector<Rect> haarRect, Mat tmplate, Point offset) {
+void updateMatches(vector<Point>& matches, vector<Rect> haarRect, vector<Rect> rotatedRect) {
 
-	int matchCount = 0;
+	vector<Point> _matches;
 
-	// Transform image to negative
+	for (int i = 0; i < matches.size(); i++)
+	{
+		bool push = 1;
+
+		// haarRect must not contain center of contour
+		for (int j = 0; j < haarRect.size(); j++)
+		{
+			if (haarRect[j].contains(matches[i])) push = 0;
+		}
+
+		// rotatedRect must not contain center of contour
+		for (int k = 0; k < rotatedRect.size(); k++)
+		{
+			if (rotatedRect[k].contains(matches[i])) push = 0;
+		}
+
+		if (push == 1) _matches.push_back(matches[i]);
+	}
+
+	matches = _matches;
+
+	/*for (auto it = matches.begin(); it != matches.end();)
+	{
+		// Matches cannot be enclosed by haarRect
+		for (int j = 0; j < haarRect.size(); j++)
+		{
+			if (haarRect[j].contains(*it))	it = matches.erase(it);
+			else							++it;
+		}
+	}
+
+	if (rotatedRect.size() != 0 && matches.size() != 0)
+	for (auto it = matches.begin(); it != matches.end();)
+	{
+		// Matches cannot be enclosed by rotatedRect
+		for (int k = 0; k < rotatedRect.size(); k++)
+		{
+			if (haarRect[k].contains(*it))	it = matches.erase(it);
+			else							++it;
+		}
+	}*/
+
+}
+
+void processContours(vector<vector<Point>> contours, vector<Point>& matches, vector<vector<Point>>& test) {
+
+	for (int i = 0; i < contours.size(); i++)
+	{
+		// Get parameters
+		float perimeter = arcLength(contours[i], false);
+		float area = contourArea(contours[i], false);
+		float roundness = pow(perimeter, 2) / (4 * 3.142 * area);
+
+		Moments mu = moments(contours[i]);
+		Point center = Point(mu.m10 / mu.m00, mu.m01 / mu.m00);
+
+		// Push if parameters are reasonable
+		if (area > 100 && area < 2000)
+		{
+			matches.push_back(center);
+			test.push_back(contours[i]);
+		}
+	}
+}
+
+void detectRotatedFaces(Mat frame, vector<Rect> haarRect, vector<Mat> &rotatedFaces) {
+
+	Mat drawing = frame.clone();
+
+	// Negative transformation
 	Mat negative_im = frame.clone();
 	cvtColor(negative_im, negative_im, CV_BGR2GRAY);
 	negative_im = 255 - negative_im;
 
-	// Match template
-	Mat corrMtrx;
-	matchTemplate(negative_im, tmplate, corrMtrx, 5);
+	// Threshold to extract high intensity regions
+	Mat binary_im;
+	threshold(negative_im, binary_im, 200, 255, CV_THRESH_BINARY);
 
-	// Fill up vector of matches
+	imshow("binary_im", binary_im);
+
+	// Form contours from high intensity regions
+	vector<vector<Point>> contours;
+	vector<Vec4i> hierarchy;
+	findContours(binary_im, contours, hierarchy, CV_RETR_EXTERNAL, CV_CHAIN_APPROX_SIMPLE, Point());
+
+	// Determine center of desired contours
 	vector<Point> matches;
-	double minVal, maxVal; Point minLoc, maxLoc;
-	for (int i = 0; i < 5; i++)
+	vector<vector<Point>> test;
+	processContours(contours, matches, test);
+
+	/*for (int i = 0; i < test.size(); i++)
 	{
-		cout << matchCount << endl;
-		bool push = 1;
-
-		// Locate best match
-		minMaxLoc(corrMtrx, &minVal, &maxVal, &minLoc, &maxLoc, Mat());
-		
-		// Mask out region surrounding best match
-		Rect mask = Rect(maxLoc.x - tmplate.cols, maxLoc.y - tmplate.rows, 2 * tmplate.cols, 2 * tmplate.rows);
-		Rect roi  = mask & boundary;
-		Mat crop  = corrMtrx(roi);
-		crop.setTo(0);
-
-		// Best match should not be located near borders (haar do not work at borders)
-		if (mask.tl() != roi.tl() || mask.br() != roi.br()) push = 0;
-
-		// Best match should not be inside haarRect (aleady detected face)
-		for (int j = 0; j < haarRect.size(); j++)
-		{
-			if (haarRect[j].contains(maxLoc))
-			{
-				push = 0;
-			}
-		}
-
-		// Push if both conditions are not violated
-		if (push == 1)
-		{
-			matches.push_back(maxLoc);
-			matchCount++;
-		}
+		Scalar color = Scalar(rng.uniform(0, 255), rng.uniform(0, 255), rng.uniform(0, 255));
+		drawContours(drawing, test, i, color, 2, 8, hierarchy, 0, Point());
 	}
+	imshow("drawing", drawing);*/
 
-	cout << matches.size() << endl;
+	// Update matches
+	updateMatches(matches, haarRect);
 
+	vector<Rect> rotatedRect;
+
+	restart:;
 	// Loop through vector of matches and form pairs
 	if (matches.size() > 1)
-	for (int i = 0; i < matches.size() - 1; i++)
 	{
-		for (int j = i + 1; j < matches.size(); j++)
+		for (int i = 0; i < matches.size() - 1; i++)
 		{
-			// Determine L / R eye
-			Point left, right;
-			if (matches[i].x < matches[j].x)
+			for (int j = i + 1; j < matches.size(); j++)
 			{
-				left = matches[i];
-				right = matches[j];
-			}
+				// Determine L / R eye
+				Point left, right;
+				if (matches[i].x < matches[j].x)
+				{
+					left = matches[i];
+					right = matches[j];
+				}
 
-			else
-			{
-				left = matches[j];
-				right = matches[i];
-			}
+				else
+				{
+					left = matches[j];
+					right = matches[i];
+				}
 
-			// Compute similarity between pairs
-			Mat tempcorrMtrx;
-			Mat Leye = negative_im(Rect(Point(left.x - tmplate.cols, left.y - tmplate.rows), Point(left.x + tmplate.cols, left.y + tmplate.rows)));
-			Mat Reye = negative_im(Rect(Point(right.x - tmplate.cols, right.y - tmplate.rows), Point(right.x + tmplate.cols, right.y + tmplate.rows)));
-			matchTemplate(Leye, Reye, tempcorrMtrx, 5);
-			minMaxLoc(tempcorrMtrx, &minVal, &maxVal, &minLoc, &maxLoc, Mat());
+				// Compute similarity between the 2 images
+				Mat Leye = frame(Rect(left.x - 20, left.y - 20, 40, 40) & Rect(0, 0, 640, 480));
+				Mat Reye = frame(Rect(right.x - 20, right.y - 20, 40, 40) & Rect(0, 0, 640, 480));
 
-			imshow("L", Leye);
-			imshow("R", Reye);
+				// Eyes should not be located near borders of image (haar does not work near borders)
+				if (Leye.size() != Reye.size()) continue;
 
-			circle(frame, left, 10, CV_RGB(255, 0, 0));
-			circle(frame, right, 10, CV_RGB(255, 0, 0));
+				// Convert to grayscale
+				cvtColor(Leye, Leye, CV_BGR2GRAY);
+				cvtColor(Reye, Reye, CV_BGR2GRAY);
 
-			// Proceed only if similarity is high ( Edit distance constraint)
-			if (norm(Mat(left), Mat(right), NORM_L2) > 150 && maxVal > 0.8)
-			{
-				circle(frame, left, 30, CV_RGB(0, 0, 255));
-				circle(frame, right, 30, CV_RGB(0, 0, 255));
+				Mat corrMtrx;
+				matchTemplate(Leye, Reye, corrMtrx, 5);
 
-				// Form rotated rect
-				//RotatedRect rotRect = formRotatedRect(left, right, frame);
+				Point min_loc, max_loc; double min, max;
+				minMaxLoc(corrMtrx, &min, &max, &min_loc, &max_loc);
 
-				// Crop image and unrotate
-				//Mat croppedIm = cropRotatedRect(rotRect, frame);
+				cout << max << endl;
+
+				// Proceed if image patches are similar
+				if (max > 0.6)
+				{
+					//Form rotated rect
+					RotatedRect rotRect = formRotatedRect(left, right, frame);
+
+					//Crop image and unrotate
+					Mat croppedIm = cropRotatedRect(rotRect, frame);
+
+					imshow("croppedIm", croppedIm);
+
+					//Continue if croppedIm not empty
+					if (!croppedIm.empty())
+					{
+						// Convert to grayscale for LBP
+						cvtColor(croppedIm, croppedIm, CV_BGR2GRAY);
+
+						// Min size to be detected
+						Size minSize = Size(croppedIm.cols*0.5, croppedIm.rows*0.5);
+
+						// LBP
+						vector<Rect> _haarRect;
+						face_cascade.detectMultiScale(croppedIm, _haarRect, 1.1, 2, 0 | CV_HAAR_SCALE_IMAGE, minSize);
+
+						// Rotated Face found, update
+						if (_haarRect.size() != 0)
+						{
+							Rect roi = _haarRect[0] & Rect(0, 0, croppedIm.cols, croppedIm.rows);
+
+							// Crop and resize before pushing
+							Mat rotatedFace = croppedIm(roi);
+							resize(rotatedFace, rotatedFace, Size(91, 112));
+
+							Point2f rect_points[4];
+							rotRect.points(rect_points);
+							for (int j = 0; j < 4; j++)
+								line(frame, rect_points[j], rect_points[(j + 1) % 4], CV_RGB(255, 0, 0), 1, 8);
+
+							// Push
+							rotatedFace.push_back(rotatedFace);
+							rotatedRect.push_back(rotRect.boundingRect());
+
+							updateMatches(matches, rotatedRect);
+							cout << matches.size() << endl;
+							goto restart;
+
+						}
+					}
+				}
 			}
 		}
 	}
@@ -462,18 +536,17 @@ void projectToEigenspace(Mat input, Mat& output) {
 
 }
 
-void detectFaces(Mat frame, vector<Mat> &haarCandidates, vector<Rect>& haarRect) {
+void detectFaces(Mat frame, vector<Mat> &haarFaces, vector<Rect>& haarRect) {
 
 	// Convert to grayscale
 	Mat frame_gray;
 	cvtColor(frame, frame_gray, CV_BGR2GRAY);
-	//equalizeHist(frame_gray, frame_gray);
 
-	// Local Binary Patterns
+	// LBP
 	vector<Rect> _haarRect;
 	face_cascade.detectMultiScale(frame_gray, _haarRect, 1.1, 2, 0 | CV_HAAR_SCALE_IMAGE, Size(30, 30));
 
-	// Update haarCandidates
+	// Update haarFaces
 	for (int i = 0; i < _haarRect.size(); i++)
 	{
 		// Why does it crash without the roi ? _haarRect ignores roi ?
@@ -484,7 +557,7 @@ void detectFaces(Mat frame, vector<Mat> &haarCandidates, vector<Rect>& haarRect)
 		resize(_haarCandidate, _haarCandidate, Size(92, 112));
 
 		// Push
-		haarCandidates.push_back(_haarCandidate);
+		haarFaces.push_back(_haarCandidate);
 		haarRect.push_back(_haarRect[i]);
 	}
 
@@ -531,8 +604,8 @@ Mat cropRotatedRect(RotatedRect boundingRect, Mat src) {
 	boundingRect.points(rect_points);
 
 	// if Rect does not exceed image boundaries
-	if (boundary.contains(rect_points[0]) && boundary.contains(rect_points[1]) && boundary.contains(rect_points[2]) && boundary.contains(rect_points[3]))
-	{
+	/*if (boundary.contains(rect_points[0]) && boundary.contains(rect_points[1]) && boundary.contains(rect_points[2]) && boundary.contains(rect_points[3]))
+	{*/
 		/*******************************************************
 									Rotate
 		*******************************************************/
@@ -558,7 +631,7 @@ Mat cropRotatedRect(RotatedRect boundingRect, Mat src) {
 		getRectSubPix(rotated, rect_size, boundingRect.center, cropped);
 
 		return cropped;
-	}
+	//}
 }
 
 string type2str(int type) {
