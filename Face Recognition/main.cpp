@@ -1,15 +1,8 @@
 ﻿/*
 
-[✓] Face Detector
-[✓]	Principal Components Analysis
-[] Use color histogram to eliminate skin matches due to ZNCC
-[] T Matching to eliminate region
-[] Enable openmp
-[] NCC vs NNC distance plot
-[] Scatter Matrix
-[] Integrate Everything
-
-[] Stabilize/Quantize Bounding box
+[✓] Stabilize bounding box
+[] Clean
+[] Get .exe
 
 Others
 Wrapper Function to project data onto Eigenspace
@@ -37,10 +30,6 @@ Standardize (row,col) of images
 using namespace std;
 using namespace cv;
 
-#define AUTOMATIC
-#define MANUAL
-
-//[DebuggerDisplay("{Class}")]
 struct database {
 
 public:
@@ -53,28 +42,19 @@ public:
 
 };
 
-// Display functions
+// Display
 void initializeDisplay();
 void CallBackFunc(int event, int x, int y, int flags, void* userdata);
+void updateDisplay(Mat& frame, const vector<Rect>& haarRect, const vector<int>& matchID, const vector<pair<double, double>>& distanceToBestMatch, vector<database> Face); // Optimize
 
-// Recognition functions
+// Detection
+void detectFaces(Mat& frame, vector<Mat> &haarFaces, vector<Rect>& haarRect);
+
+// Recognition
 void PrincipalComponentsAnalysis(vector<database>& Face, int principalComponents, Mat& eigenFace, Mat& meanFace);
-void projectToEigenspace(Mat input, Mat& output);
-bool myfunction(int i, int j);
-
-// Detection functions
-void detectFaces(Mat frame, vector<Mat> &haarFaces, vector<Rect>& haarRect);
-
-void detectRotatedFaces(Mat frame, vector<Rect> haarRect, vector<Mat> &rotatedFaces);
-RotatedRect formRotatedRect(Mat left, Mat right, Mat frame);
-Mat cropRotatedRect(RotatedRect boundingRect, Mat src);
-void visit(int i, vector<vector<Point>> contours, vector<int>& group);
-RotatedRect formRotatedRect2(vector<vector<Point>> contour);
-void updateDisplay(Mat& frame, vector<Rect> haarRect, vector<int> matchID, vector<pair<double, double>> distanceToBestMatch, vector<database> Face);
-void getMatches(vector<database> Faces, vector<Mat> haarFaces_compressed, vector<int>& matchID, vector<pair<double, double>>& distanceToBestMatch);
-
-void processContours(vector<vector<Point>> contours, vector<Point>& matches, vector<vector<Point>>& test);
-void updateMatches(vector<Point>& matches, vector<Rect> haarRect = vector<Rect>(), vector<Rect> rotatedRect = vector<Rect>());
+void projectToEigenspace(vector<Mat>& input);
+void projectToEigenspace(vector<database>& face);
+void getMatches(const vector<database>& Faces, const vector<Mat>& haarFaces_compressed, vector<int>& matchID, vector<pair<double, double>>& distanceToBestMatch);
 
 // Extra unsused functions
 string type2str(int type);
@@ -90,11 +70,6 @@ Mat display_color = Mat(Size(1920, 1080), CV_8UC3, Scalar(150, 100, 0));
 
 bool viola_called = false;
 
-Rect boundary = Rect(0, 0, 601, 453); // 601 453
-
-vector<Mat> tmplates;
-vector<Point> offsets;
-
 int main(int argc, const char** argv)
 {
 	/*********************************************************************************
@@ -106,20 +81,20 @@ int main(int argc, const char** argv)
 	setMouseCallback(window_name, CallBackFunc, NULL);
 
 	// Load the cascades
-	if (!face_cascade.load(face_cascade_name)){ printf("--(!)Error loading\n"); return -1; };
+	if (!face_cascade.load(face_cascade_name)) { printf("--(!)Error loading\n"); return -1; };
 
 	// Initialize openmp
-	omp_set_num_threads(8);
+	omp_set_num_threads(3);
 
 	// STORE OFFLINE
 	vector<Mat> rotationMatrix;
-	rotationMatrix.push_back((Mat_<double>(2, 3) << 0.7071067811865476, 0.7071067811865476, 0, -0.7071067811865476, 0.7071067811865476, 0)); // 45
-	rotationMatrix.push_back((Mat_<double>(2, 3) << 0.7071067811865476, -0.7071067811865476, 0, 0.7071067811865476, 0.7071067811865476, 0)); // -45
+	rotationMatrix.push_back((Mat_<double>(2, 3) << 0.8660254037844387, 0.4999999999999999, -77.12812921102037, -0.4999999999999999, 0.8660254037844387, 192.1539030917347)); // 30
+	rotationMatrix.push_back((Mat_<double>(2, 3) << 0.8660254037844387, -0.4999999999999999, 162.8718707889796,	0.4999999999999999, 0.8660254037844387, -127.8460969082653)); // -45
 	rotationMatrix.push_back((Mat_<double>(2, 3) << 6.123233995736766e-017,  1, 0, -1, 6.123233995736766e-017, 0)); // 90
 	rotationMatrix.push_back((Mat_<double>(2, 3) << 6.123233995736766e-017, -1, 0,	1, 6.123233995736766e-017, 0)); // -90
 
 	/*********************************************************************************
-								INITIALIZE DATABASE
+								Initialize
 	**********************************************************************************/
 
 	// Read all in folder
@@ -172,312 +147,126 @@ int main(int argc, const char** argv)
 	// PCA
 	PrincipalComponentsAnalysis(Face, 50, eigenFace, meanFace);
 
-	// Project training data onto Eigenspace
-	for (int i = 0; i < Face.size(); i++) projectToEigenspace(Face[i].Image, Face[i].Image_compressed);
+	// Project to Eigenspace
+	projectToEigenspace(Face);
 
 	/*********************************************************************************
 									BEGIN
 	**********************************************************************************/
-
+		
 	Mat frame;
+	int threadReady = 0;
+	vector<Rect> All;
 
 	// Initialize camera
-	if (capture.open(0))
+	capture.open(0);
+
+	capture.set(CV_CAP_PROP_FRAME_WIDTH, 640);
+	capture.set(CV_CAP_PROP_FRAME_HEIGHT, 480);
+
+	// Begin multi thread
+    #pragma omp parallel shared(frame, threadReady)
 	{
-		capture.set(CV_CAP_PROP_FRAME_WIDTH, 640);
-		capture.set(CV_CAP_PROP_FRAME_HEIGHT, 480);
-
-		// Begin multi thread
-		#pragma omp parallel
+		// Get thread ID
+		int TID = omp_get_thread_num();			
+		while (true)
 		{
-			// Get thread ID
-			int TID = omp_get_thread_num();
+			vector<Mat> haarFaces;
+			vector<Rect> haarRect;
+			vector<int> matchID;
+			vector<pair<double, double>> distanceToBestMatch;
 
-			while (true)
+			// Read in frame
+			#pragma omp single
 			{
-				// Single thread to read in frame
-				#pragma omp single
+				capture >> frame;
+				flip(frame, frame, 1);
+			}
+
+			// Run default detector on thread 0
+			if (TID == 0)
+			{					
+				if (viola_called)
 				{
-					capture >> frame;
-					flip(frame, frame, 1);
+					/********************************************************
+											DETECTION
+					*********************************************************/
+
+					// Detect faces
+					detectFaces(frame, haarFaces, haarRect);
+
+					/********************************************************
+											RECOGNITION
+					*********************************************************/
+						
+					// Project to Eigenspace
+					projectToEigenspace(haarFaces);
+
+					// Get ID of best matches
+					getMatches(Face, haarFaces, matchID, distanceToBestMatch);
+						
+					// Draw result on frame
+					//updateDisplay(frame, haarRect, matchID, distanceToBestMatch, Face);
+					viola_called = true;
+					threadReady++;
 				}
 
-				// Run default detector on thread 0
-				if (TID == 0)
-				{					
-					if (viola_called)
-					{
-						/********************************************************
-												DETECTION
-						*********************************************************/
+				/*frame.copyTo(display_color(input_video));
+				imshow(window_name, display_color);
+				waitKey(1);*/
+			}
 
-						// Detect haar faces
-						vector<Mat> haarFaces;
-						vector<Rect> haarRect;
-						detectFaces(frame, haarFaces, haarRect);
+			// Run brute force detector on remaining threads
+			if (TID < 3 && TID > 0)
+			{
+				// Rotate input frame
+				Mat rotated;
+				warpAffine(frame, rotated, rotationMatrix[TID-1], frame.size(), INTER_CUBIC);
 
-						/********************************************************
-												RECOGNITION
-						*********************************************************/
-
-						int numberOfCandidates = haarFaces.size();
-
-						// Project to Eigenspace
-						vector<Mat> haarFaces_compressed(numberOfCandidates);
-						for (int i = 0; i < numberOfCandidates; i++)
-							projectToEigenspace(haarFaces[i], haarFaces_compressed[i]);
-
-						// Get ID of best matches
-						vector<int> matchID;
-						vector<pair<double, double>> distanceToBestMatch;
-						getMatches(Face, haarFaces_compressed, matchID, distanceToBestMatch);
-
-						// Draw result on frame
-						updateDisplay(frame, haarRect, matchID, distanceToBestMatch, Face);
-						viola_called = true;
-					}
-					// Display video stream
-					frame.copyTo(display_color(input_video));
-					imshow(window_name, display_color);
-					waitKey(1);
-				}
-
-				// Run brute force detector on threads 1 to 6
-				else if (TID < 5 && TID > 0)
+				if (viola_called)
 				{
-					Mat rotated;
+					/********************************************************
+											DETECTION
+					*********************************************************/
 
-					// perform the affine transformation
-					warpAffine(frame, rotated, rotationMatrix[TID-1], frame.size(), INTER_CUBIC);
+					// Detect faces
+					detectFaces(rotated, haarFaces, haarRect);
 
+					/********************************************************
+											RECOGNITION
+					*********************************************************/
+						
+					// Project to Eigenspace
+					projectToEigenspace(haarFaces);
 
-					
+					// Get ID of best matches
+					getMatches(Face, haarFaces, matchID, distanceToBestMatch);
 
+					//updateDisplay(frame, haarRect, matchID, distanceToBestMatch, Face);
+					viola_called = true;
+					threadReady++;
 				}
 			}
-		}
 
-	}
+			#pragma omp critical
+			updateDisplay(frame, haarRect, matchID, distanceToBestMatch, Face);
 
-	else
-	{
-		std::cerr << "ERROR: Could not open camera" << std::endl;
-		return 1;
-	}
-
-	//// Video frame
-	//Mat frame;
-
-	////-- 2. Read the video stream
-	//if (capture.open(0))
-	//{
-	//	// Set capture width and height
-	//	capture.set(CV_CAP_PROP_FRAME_WIDTH, 640);
-	//	capture.set(CV_CAP_PROP_FRAME_HEIGHT, 480);
-
-	//	while (true)
-	//	{
-	//		// read in frame and flip
-	//		capture >> frame;
-
-	//		flip(frame, frame, 1);
-
-	//		if (!frame.empty())
-	//		{
-	//			// Detect Faces
-	//			if (viola_called)
-	//			{
-	//				/********************************************************
-
-	//				DETECTION
-
-	//				*********************************************************/
-
-	//				// Detect haar faces
-	//				vector<Mat> haarFaces;
-	//				vector<Rect> haarRect;
-	//				detectFaces(frame, haarFaces, haarRect);
-
-	//				// Detect rotated faces 
-	//				/*vector<Mat> rotatedFaces;
-	//				vector<Rect> rotatedRect;
-	//				detectRotatedFaces(frame, haarRect, rotatedFaces);*/
-
-	//				/********************************************************
-
-	//				RECOGNITION
-
-	//				*********************************************************/
-
-	//				int numberOfCandidates = haarFaces.size();
-
-	//				// Project to Eigenspace
-	//				vector<Mat> haarFaces_compressed(numberOfCandidates);
-	//				for (int i = 0; i < numberOfCandidates; i++)
-	//					projectToEigenspace(haarFaces[i], haarFaces_compressed[i]);
-
-	//				// Get ID of best matches
-	//				vector<int> matchID;
-	//				vector<pair<double, double>> distanceToBestMatch;
-	//				getMatches(Face, haarFaces_compressed, matchID, distanceToBestMatch);
-
-	//				// Draw result on frame
-	//				updateDisplay(frame, haarRect, matchID, distanceToBestMatch, Face);
-	//				viola_called = true;
-	//			}
-
-	//			// Display video stream
-	//			frame.copyTo(display_color(input_video));
-	//			imshow(window_name, display_color);
-	//			waitKey(1);
-	//		}
-
-	//		else
-	//		{
-	//			printf(" --(!) No captured frame -- Break!"); break;
-	//		}
-
-	//	}
-	//}
-
-	//else
-	//{
-	//	std::cerr << "ERROR: Could not open camera" << std::endl;
-	//	return 1;
-	//}
-
-	//return 0;
-}
-
-RotatedRect formRotatedRect(Point lefteye, Point righteye, Mat src) {
-
-	// 4 corners of the rect
-	Point topLeft, topRight, bottomLeft, bottomRight;
-
-	float theta = atan(((float)(righteye.y - lefteye.y) / (righteye.x - lefteye.x)));
-	float pd = norm(lefteye - righteye);
-
-	// Compute the 4 corners
-	topLeft.x = lefteye.x - 1 * pd*cos(theta) + 1 * pd*sin(theta);
-	topLeft.y = lefteye.y - 1 * pd*sin(theta) - 1 * pd*cos(theta);
-
-	topRight.x = righteye.x + 1 * pd*cos(theta) + 1 * pd*sin(theta);
-	topRight.y = righteye.y + 1 * pd*sin(theta) - 1 * pd*cos(theta);
-
-	bottomLeft.x = lefteye.x - pd * cos(theta) - 1.5 * pd * sin(theta);
-	bottomLeft.y = lefteye.y - pd * sin(theta) + 1.5 * pd * cos(theta);
-
-	bottomRight.x = righteye.x + pd*cos(theta) - 1.5 * pd * sin(theta);
-	bottomRight.y = righteye.y + pd*sin(theta) + 1.5 * pd * cos(theta);
-
-	// Push
-	vector<Point> rectCorners;
-	rectCorners.push_back(topLeft);
-	rectCorners.push_back(topRight);
-	rectCorners.push_back(bottomLeft);
-	rectCorners.push_back(bottomRight);
-
-	// Generate the rotated rectangle
-	RotatedRect boundingRect;
-	boundingRect = minAreaRect(Mat(rectCorners));
-
-	return boundingRect;
-}
-
-void updateMatches(vector<Point>& matches, vector<Rect> haarRect, vector<Rect> rotatedRect) {
-
-	if (haarRect.size() != 0)
-		for (auto it = matches.begin(); it != matches.end();)
-		{
-			bool erase = 0;
-
-			// Matches cannot be enclosed by haarRect ( already detected faces )
-			for (int j = 0; j < haarRect.size(); j++) if (haarRect[j].contains(*it)) erase = 1;
-
-			if (erase) it = matches.erase(it);
-			else	   it++;
-		}
-
-	if (rotatedRect.size() != 0)
-		for (auto it = matches.begin(); it != matches.end();)
-		{
-			bool erase = 0;
-
-			// Matches cannot be enclosed by rotatedRect ( newly detected faces )
-			for (int k = 0; k < rotatedRect.size(); k++) if (rotatedRect[k].contains(*it)) erase = 1;
-
-			if (erase)	it = matches.erase(it);
-			else		it++;
-		}
-}
-
-void processContours(vector<vector<Point>> contours, vector<Point>& matches, vector<vector<Point>>& test) {
-
-	for (int i = 0; i < contours.size(); i++)
-	{
-		// Get parameters
-		float perimeter = arcLength(contours[i], false);
-		float area = contourArea(contours[i], false);
-		float roundness = pow(perimeter, 2) / (4 * 3.142 * area);
-
-		Moments mu = moments(contours[i]);
-		Point center = Point(mu.m10 / mu.m00, mu.m01 / mu.m00);
-
-		// Push if parameters are reasonable
-		if (area > 50)
-		{
-			matches.push_back(center);
-			test.push_back(contours[i]);
+            #pragma omp single
+			{
+				frame.copyTo(display_color(input_video));
+				imshow(window_name, display_color);
+				waitKey(1);
+			}
 		}
 	}
-}
-
-RotatedRect formRotatedRect2(vector<vector<Point>> contour) {
-
-	vector<Point> points;
-
-	for (int i = 0; i < contour.size(); i++)
-		for (int j = 0; j < contour[i].size(); j++)
-		{
-			points.push_back(contour[i][j]);
-		}
-
-	RotatedRect boundingRect;
-	boundingRect = minAreaRect(Mat(points));
-
-	return boundingRect;
-
-}
-
-bool myfunction(int i, int j) { return (i<j); }
-
-void visit(int i, vector<vector<Point>> contours, vector<int>& group) {
-
-	// Start from current contour
-	Moments mu1 = moments(contours[i]);
-	Point center1 = Point(mu1.m10 / mu1.m00, mu1.m01 / mu1.m00);
-
-	// Search for nearest neighbour
-	for (int j = i + 1; j < contours.size(); j++)
-	{
-		Moments mu2 = moments(contours[j]);
-		Point center2 = Point(mu2.m10 / mu2.m00, mu2.m01 / mu2.m00);
-
-		if (norm(center1 - center2) < 75 && find(group.begin(), group.end(), j) == group.end())
-		{
-			group.push_back(j);
-			visit(j, contours, group);
-		}
-	}
-
 }
 
 void PrincipalComponentsAnalysis(vector<database>& Face, int principalComponents, Mat& eigenFace, Mat& meanFace) {
 
-	// Size of column vector
+	// Initialize dimension of column vector
 	int faceDimension = Face[0].Image.rows* Face[0].Image.cols;
 
-	// Size of database
+	// Initialize size of database
 	int sizeOfDatabase = Face.size();
 
 	meanFace = Mat::zeros(Face[0].Image.size(), CV_32FC1);
@@ -511,19 +300,34 @@ void PrincipalComponentsAnalysis(vector<database>& Face, int principalComponents
 	eigenFace = eigenvectors_retained;
 }
 
-void projectToEigenspace(Mat input, Mat& output) {
+void projectToEigenspace(vector<Mat>& input) {
 
 	// Convert to 32 bit for operation
-	if (type2str(input.type()).compare("8UC1") == 0)	input.convertTo(input, CV_32FC1);
+	for (int i = 0; i < input.size(); i++)
+	{
+		if (type2str(input[i].type()).compare("8UC1") == 0)	input[i].convertTo(input[i], CV_32FC1);
 
-	Mat temp_input = input.clone();
-	temp_input = temp_input - meanFace;
-	output = eigenFace.t() * temp_input.reshape(0, temp_input.rows * temp_input.cols);
-
+		Mat temp_input = input[i].clone();
+		temp_input = temp_input - meanFace;
+		input[i] = eigenFace.t() * temp_input.reshape(0, temp_input.rows * temp_input.cols);
+	}
 }
 
-void detectFaces(Mat frame, vector<Mat> &haarFaces, vector<Rect>& haarRect) {
+void projectToEigenspace(vector<database>& face) {
 
+	// Convert to 32 bit for operation
+	for (int i = 0; i < face.size(); i++)
+	{
+		if (type2str(face[i].Image.type()).compare("8UC1") == 0)	face[i].Image.convertTo(face[i].Image, CV_32FC1);
+
+		Mat temp_input = face[i].Image.clone();
+		temp_input = temp_input - meanFace;
+		face[i].Image_compressed = eigenFace.t() * temp_input.reshape(0, temp_input.rows * temp_input.cols);
+	}
+}
+
+void detectFaces(Mat& frame, vector<Mat> &haarFaces, vector<Rect>& haarRect) {
+	
 	static int j = 0;
 
 	// Convert to grayscale
@@ -534,7 +338,7 @@ void detectFaces(Mat frame, vector<Mat> &haarFaces, vector<Rect>& haarRect) {
 	// LBP
 	vector<Rect> _haarRect;
 	face_cascade.detectMultiScale(frame_gray, _haarRect, 1.1, 2, 0 | CV_HAAR_SCALE_IMAGE, Size(30, 30));
-
+	
 	// Update haarFaces
 	for (int i = 0; i < _haarRect.size(); i++)
 	{
@@ -554,7 +358,7 @@ void detectFaces(Mat frame, vector<Mat> &haarFaces, vector<Rect>& haarRect) {
 	}
 }
 
-void updateDisplay(Mat& frame, vector<Rect> haarRect, vector<int> matchID, vector<pair<double, double>> distanceToBestMatch, vector<database> Face) {
+void updateDisplay(Mat& frame, const vector<Rect>& haarRect, const vector<int>& matchID, const vector<pair<double, double>>& distanceToBestMatch, vector<database> Face) {
 
 	// Loop through all candidates
 	for (int i = 0; i < haarRect.size(); i++)
@@ -571,7 +375,7 @@ void updateDisplay(Mat& frame, vector<Rect> haarRect, vector<int> matchID, vecto
 
 }
 
-void getMatches(vector<database> Faces, vector<Mat> haarFaces_compressed, vector<int>& matchID, vector<pair<double, double>>& distanceToBestMatch) {
+void getMatches(const vector<database>& Faces, const vector<Mat>& haarFaces_compressed, vector<int>& matchID, vector<pair<double, double>>& distanceToBestMatch) {
 
 	int numberOfCandidates = haarFaces_compressed.size();
 	int numberOfFaces = Faces.size();
@@ -624,40 +428,6 @@ void CallBackFunc(int event, int x, int y, int flags, void* userdata)
 		cout << "Middle button of the mouse is clicked - position (" << x << ", " << y << ")" << endl;
 	}
 
-}
-
-Mat cropRotatedRect(RotatedRect boundingRect, Mat src) {
-
-	Point2f rect_points[4];
-	boundingRect.points(rect_points);
-
-	// if Rect does not exceed image boundaries
-	/*if (boundary.contains(rect_points[0]) && boundary.contains(rect_points[1]) && boundary.contains(rect_points[2]) && boundary.contains(rect_points[3]))
-	{*/
-
-	Mat M, rotated, cropped;
-
-	// get angle and size from the bounding box
-	float angle = boundingRect.angle;
-	Size rect_size = boundingRect.size;
-
-	// thanks to http://felix.abecassis.me/2011/10/opencv-rotation-deskewing/
-	if (angle < -45.) {
-		angle += 90.0;
-		swap(rect_size.width, rect_size.height);
-	}
-
-	// get the rotation matrix
-	M = getRotationMatrix2D(boundingRect.center, angle, 1.0);
-
-	// perform the affine transformation
-	warpAffine(src, rotated, M, src.size(), INTER_CUBIC);
-
-	// crop the resulting image
-	getRectSubPix(rotated, rect_size, boundingRect.center, cropped);
-
-	return cropped;
-	//}
 }
 
 string type2str(int type) {
