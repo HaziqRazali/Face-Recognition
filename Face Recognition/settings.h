@@ -1,16 +1,8 @@
 #include <cv.h>
 
-#include "opencv2/objdetect/objdetect.hpp"
-#include "opencv2/highgui/highgui.hpp"
-#include "opencv2/imgproc/imgproc.hpp"
-
 using namespace cv;
 
 Rect input_video		= Rect(50, 100, 640, 480);
-
-
-
-
 
 
 // Button Position
