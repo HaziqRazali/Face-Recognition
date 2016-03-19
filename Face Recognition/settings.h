@@ -1,5 +1,4 @@
 #include <cv.h>
-
 using namespace cv;
 
 Rect input_video		= Rect(50, 100, 640, 480);

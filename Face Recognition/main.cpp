@@ -111,6 +111,13 @@ int main(int argc, const char** argv)
 	// Initialize openmp
 	omp_set_num_threads(8);
 
+	// STORE OFFLINE
+	vector<Mat> rotationMatrix;
+	rotationMatrix.push_back((Mat_<double>(2, 3) << 0.7071067811865476, 0.7071067811865476, 0, -0.7071067811865476, 0.7071067811865476, 0)); // 45
+	rotationMatrix.push_back((Mat_<double>(2, 3) << 0.7071067811865476, -0.7071067811865476, 0, 0.7071067811865476, 0.7071067811865476, 0)); // -45
+	rotationMatrix.push_back((Mat_<double>(2, 3) << 6.123233995736766e-017,  1, 0, -1, 6.123233995736766e-017, 0)); // 90
+	rotationMatrix.push_back((Mat_<double>(2, 3) << 6.123233995736766e-017, -1, 0,	1, 6.123233995736766e-017, 0)); // -90
+
 	/*********************************************************************************
 								INITIALIZE DATABASE
 	**********************************************************************************/
@@ -172,6 +179,8 @@ int main(int argc, const char** argv)
 									BEGIN
 	**********************************************************************************/
 
+	Mat frame;
+
 	// Initialize camera
 	if (capture.open(0))
 	{
@@ -186,20 +195,20 @@ int main(int argc, const char** argv)
 
 			while (true)
 			{
+				// Single thread to read in frame
+				#pragma omp single
+				{
+					capture >> frame;
+					flip(frame, frame, 1);
+				}
+
 				// Run default detector on thread 0
 				if (TID == 0)
-				{
-					Mat frame;
-					capture >> frame;
-
-					flip(frame, frame, 1);
-					
+				{					
 					if (viola_called)
 					{
 						/********************************************************
-
 												DETECTION
-
 						*********************************************************/
 
 						// Detect haar faces
@@ -207,11 +216,8 @@ int main(int argc, const char** argv)
 						vector<Rect> haarRect;
 						detectFaces(frame, haarFaces, haarRect);
 
-
 						/********************************************************
-
 												RECOGNITION
-
 						*********************************************************/
 
 						int numberOfCandidates = haarFaces.size();
@@ -230,7 +236,6 @@ int main(int argc, const char** argv)
 						updateDisplay(frame, haarRect, matchID, distanceToBestMatch, Face);
 						viola_called = true;
 					}
-
 					// Display video stream
 					frame.copyTo(display_color(input_video));
 					imshow(window_name, display_color);
@@ -238,9 +243,16 @@ int main(int argc, const char** argv)
 				}
 
 				// Run brute force detector on threads 1 to 6
-				else if (TID < 7 || TID > 0)
+				else if (TID < 5 && TID > 0)
 				{
-					cout << TID << "Brute" << endl;
+					Mat rotated;
+
+					// perform the affine transformation
+					warpAffine(frame, rotated, rotationMatrix[TID-1], frame.size(), INTER_CUBIC);
+
+
+					
+
 				}
 			}
 		}
