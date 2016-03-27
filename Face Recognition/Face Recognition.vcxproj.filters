@@ -21,7 +21,7 @@
     <ClInclude Include="PCA.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Detector.h">
+    <ClInclude Include="FaceDetector.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
