@@ -153,6 +153,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="FaceDetector.h" />
+    <ClInclude Include="GUI.h" />
     <ClInclude Include="PCA.h" />
     <ClInclude Include="settings.h" />
   </ItemGroup>

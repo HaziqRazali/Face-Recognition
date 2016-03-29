@@ -17,46 +17,55 @@
 using namespace std;
 using namespace cv;
 
-// Display
+//=============================================================================================
+
+// Display functions
 void initializeDisplay();
 void CallBackFunc(int event, int x, int y, int flags, void* userdata);
-void updateDisplay(Mat& frame, const vector<Rect>& candidate, const vector<string>& candidateName);
+void updateDisplay(Mat& frame, const vector<Rect>& candidate, const vector<string>& candidateName, Mat& display);
 
-// Extra unsused functions
-string type2str(int type);
+// Display buttons
+Rect recognition_button = Rect(680, 400, 400, 100);
+Rect exit_button		= Rect(680, 520, 400, 100);
 
-bool viola_called = false;
+// State
+bool recognition = 0;
 
+// GUI display
+Mat display;
+
+//=============================================================================================
 int main(int argc, const char** argv)
 {
 	// ============== Initialize ================
 	
-	//initializeDisplay();										// Display
-	//setMouseCallback("Face detection", CallBackFunc, NULL);	// Buttons
+	// Display
+	initializeDisplay();
 
-	PrincipalComponentsAnalysis PCA("databasetest.txt", 0.95);    // PCA
-	FaceDetector Detector("databasetest.txt");				    // Face Detector
+	// Detector and Recognition classes
+	PrincipalComponentsAnalysis PCA("databasetest.txt", 0.95);
+	FaceDetector Detector("databasetest.txt");
 
-	// =============== Begin =====================
-	
-	// Initialize camera
+	// Camera
 	capture.open(0);
 	capture.set(CV_CAP_PROP_FRAME_WIDTH, 640);
 	capture.set(CV_CAP_PROP_FRAME_HEIGHT, 480);
 
-	// Merge data
-	
-
-	// Begin multi thread
+	// Shared container
 	vector<Rect> combinedCandidateRect;
 	vector<string> combinedCandidateName;
+
+	// =============== Begin =====================
+
+	// Begin multi threading
 	omp_set_num_threads(3);
     #pragma omp parallel shared(combinedCandidateRect, combinedCandidateName)
 	{
 		Mat frame;
 
 		// Get thread ID
-		int TID = omp_get_thread_num();			
+		int TID = omp_get_thread_num();
+
 		while (true)
 		{
 			// Read in frame
@@ -67,56 +76,87 @@ int main(int argc, const char** argv)
 			vector<Mat> candidate;
 			vector<Rect> candidateRect;
 			vector<string> candidateName;
-			
-			// Run default detector on thread 0
-			if (TID == 0)
-			{					
-				if (true)
-				{
-					Detector.detect(frame, candidate, candidateRect);	// Detect faces
-					PCA.classify(candidate, candidateName);				// Classify faces
-				}
-			}
 
-			// Rotate images and run detector on remaining threads
-			if (TID == 1 || TID == 2)
-			{
-				if (true)
-				{
-					Detector.detect(frame, candidate, candidateRect, TID);	// Detect faces
-					PCA.classify(candidate, candidateName);					// Classify faces
+			// Recognition enabled - barrier ?
+			if (recognition)
+			{			
+				// Run default detector on thread 0
+				if (TID == 0)
+				{					
+					if (true)
+					{
+						Detector.detect(frame, candidate, candidateRect);	// Detect faces
+						PCA.classify(candidate, candidateName);				// Classify faces
+					}
 				}
-			}
 
-			// Merge data
-			#pragma omp critical
-			{
-				combinedCandidateRect.insert(combinedCandidateRect.end(), candidateRect.begin(), candidateRect.end());
-				combinedCandidateName.insert(combinedCandidateName.end(), candidateName.begin(), candidateName.end());
+				// Rotate images and run detector on threads 1 and 2
+				if (TID == 1 || TID == 2)
+				{
+					if (true)
+					{
+						Detector.detect(frame, candidate, candidateRect, TID);	// Detect faces
+						PCA.classify(candidate, candidateName);					// Classify faces
+					}
+				}
+
+				// Merge data - does it act as a barrier ?
+				#pragma omp critical
+				{
+					combinedCandidateRect.insert(combinedCandidateRect.end(), candidateRect.begin(), candidateRect.end());
+					combinedCandidateName.insert(combinedCandidateName.end(), candidateName.begin(), candidateName.end());
+				}
 			}
 
 			// Wait for all threads
 			#pragma omp barrier
 
-			// Show result -- Why name change = hang ?
+			// Show result
 			if (TID == 0)
 			{
-				cout << combinedCandidateRect.size() << " " << combinedCandidateName.size() << endl;
-				updateDisplay(frame, combinedCandidateRect, combinedCandidateName);
-				imshow("Result", frame);
+				updateDisplay(frame, combinedCandidateRect, combinedCandidateName, display);
+				imshow("EE4902 - Face Recognition", display);
 				waitKey(1);
 			}
 
 			// Wait for all threads
-            #pragma omp barrier
+			#pragma omp barrier
 
-			combinedCandidateRect.clear();
-			combinedCandidateName.clear();
+			// Clear shared container for next iteration
+			#pragma omp single
+			{
+				combinedCandidateRect.clear();
+				combinedCandidateName.clear();
+			}
 		}
 	}
 }
 
-void updateDisplay(Mat& frame, const vector<Rect>& candidate, const vector<string>& candidateName) {
+//=============================================================================================
+void initializeDisplay() {
+
+	// Read in background image
+	display = imread("Background.png");	
+
+	// Read in buttons
+	Mat recognition_button_image	= imread("recognition_button.png");
+	Mat exit_button_image			= imread("exit_button.png");
+	Mat NTU_logo_image				= imread("NTU_Logo.png");
+
+	// Initialize display
+	recognition_button_image.copyTo(display(recognition_button));
+	exit_button_image.copyTo(display(exit_button));
+	NTU_logo_image.copyTo(display(Rect(15, 20, 300, 100)));
+
+	// Create display
+	namedWindow("EE4902 - Face Recognition", CV_WINDOW_AUTOSIZE);
+	imshow("EE4902 - Face Recognition", display);
+	setMouseCallback("EE4902 - Face Recognition", CallBackFunc, NULL);
+	waitKey(1);
+}
+
+//=============================================================================================
+void updateDisplay(Mat& frame, const vector<Rect>& candidate, const vector<string>& candidateName, Mat& display) {
 
 	// Loop through all candidates
 	for (int i = 0; i < candidate.size(); i++)
@@ -127,22 +167,17 @@ void updateDisplay(Mat& frame, const vector<Rect>& candidate, const vector<strin
 		// Display ID
 		putText(frame, candidateName[i], candidate[i].tl(), CV_FONT_HERSHEY_SIMPLEX, 2, CV_RGB(255, 0, 0));
 	}
+
+	// Copy to GUI
+	frame.copyTo(display(Rect(15, 140, 640, 480)));
 }
 
-void initializeDisplay() {
-
-//	display_color = imread("Background.jpg");
-//	namedWindow("Face detection", CV_WINDOW_AUTOSIZE);
-
-//	rectangle(display_color, face_detect_button, Scalar(0, 0, 255), -1);
-//	rectangle(display_color, exit_button, Scalar(0, 255, 0), -1);
-}
-
+//=============================================================================================
 void CallBackFunc(int event, int x, int y, int flags, void* userdata)
 {
 	if (event == EVENT_LBUTTONDOWN)
 	{
-		if (face_detect_button.contains(Point(x, y)))	viola_called = true;
+		if (recognition_button.contains(Point(x, y)))	recognition = !recognition;
 		if (exit_button.contains(Point(x, y)))			exit(0);
 	}
 
@@ -155,5 +190,4 @@ void CallBackFunc(int event, int x, int y, int flags, void* userdata)
 	{
 		cout << "Middle button of the mouse is clicked - position (" << x << ", " << y << ")" << endl;
 	}
-
 }

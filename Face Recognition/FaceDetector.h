@@ -60,12 +60,6 @@ public:
 		if (TID != 0)
 		{
 			frame = rotateImage(frame, TID);
-			if (TID == 2)
-			{
-				imshow("L", frame);
-				waitKey(1);
-			}
-
 		}
 
 		// Convert to grayscale
@@ -93,6 +87,8 @@ public:
 			haarFaces.push_back(_haarCandidate);
 			haarRect.push_back(_haarRect[i]);
 		}
+
+		//if (TID == 0) cout << haarFaces.size() << endl;
 		
 	}
 
