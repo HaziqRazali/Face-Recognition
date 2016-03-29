@@ -42,7 +42,7 @@ int main(int argc, const char** argv)
 	// Display
 	initializeDisplay();
 
-	// Detector and Recognition classes
+	// Detector and Recognition classes -- Should I initialize INSIDE the parallel section ?
 	PrincipalComponentsAnalysis PCA("databasetest.txt", 0.95);
 	FaceDetector Detector("databasetest.txt");
 
@@ -77,30 +77,24 @@ int main(int argc, const char** argv)
 			vector<Rect> candidateRect;
 			vector<string> candidateName;
 
-			// Recognition enabled - barrier ?
+			// =============== Detection and Recognition =====================
 			if (recognition)
 			{			
 				// Run default detector on thread 0
 				if (TID == 0)
 				{					
-					if (true)
-					{
-						Detector.detect(frame, candidate, candidateRect);	// Detect faces
-						PCA.classify(candidate, candidateName);				// Classify faces
-					}
+					Detector.detect(frame, candidate, candidateRect, TID);		// Detect faces
+					PCA.classify(candidate, candidateName);					// Classify faces
 				}
 
 				// Rotate images and run detector on threads 1 and 2
 				if (TID == 1 || TID == 2)
 				{
-					if (true)
-					{
-						Detector.detect(frame, candidate, candidateRect, TID);	// Detect faces
-						PCA.classify(candidate, candidateName);					// Classify faces
-					}
+					Detector.detect(frame, candidate, candidateRect, TID);	// Detect faces
+					PCA.classify(candidate, candidateName);					// Classify faces
 				}
 
-				// Merge data - does it act as a barrier ?
+				// Merge results - implicit barrier ?
 				#pragma omp critical
 				{
 					combinedCandidateRect.insert(combinedCandidateRect.end(), candidateRect.begin(), candidateRect.end());
@@ -108,7 +102,7 @@ int main(int argc, const char** argv)
 				}
 			}
 
-			// Wait for all threads
+			// Wait for all threads - Why #single lag ?
 			#pragma omp barrier
 
 			// Show result
@@ -122,7 +116,7 @@ int main(int argc, const char** argv)
 			// Wait for all threads
 			#pragma omp barrier
 
-			// Clear shared container for next iteration
+			// Clear shared container for next iteration -- Change to TID since single lags ?
 			#pragma omp single
 			{
 				combinedCandidateRect.clear();
@@ -138,7 +132,7 @@ void initializeDisplay() {
 	// Read in background image
 	display = imread("Background.png");	
 
-	// Read in buttons
+	// Read in button images
 	Mat recognition_button_image	= imread("recognition_button.png");
 	Mat exit_button_image			= imread("exit_button.png");
 	Mat NTU_logo_image				= imread("NTU_Logo.png");
@@ -151,6 +145,8 @@ void initializeDisplay() {
 	// Create display
 	namedWindow("EE4902 - Face Recognition", CV_WINDOW_AUTOSIZE);
 	imshow("EE4902 - Face Recognition", display);
+
+	// Set mouse callback
 	setMouseCallback("EE4902 - Face Recognition", CallBackFunc, NULL);
 	waitKey(1);
 }
@@ -179,15 +175,5 @@ void CallBackFunc(int event, int x, int y, int flags, void* userdata)
 	{
 		if (recognition_button.contains(Point(x, y)))	recognition = !recognition;
 		if (exit_button.contains(Point(x, y)))			exit(0);
-	}
-
-	else if (event == EVENT_RBUTTONDOWN)
-	{
-		cout << "Right button of the mouse is clicked - position (" << x << ", " << y << ")" << endl;
-	}
-
-	else if (event == EVENT_MBUTTONDOWN)
-	{
-		cout << "Middle button of the mouse is clicked - position (" << x << ", " << y << ")" << endl;
 	}
 }

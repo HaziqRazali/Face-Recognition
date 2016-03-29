@@ -54,7 +54,7 @@ public:
 	}
 
 	//=============================================================================================
-	void detect(Mat frame, vector<Mat>& haarFaces, vector<Rect>& haarRect, int TID = 0) {
+	void detect(Mat frame, vector<Mat>& candidate, vector<Rect>& candidateRect, int TID = 0) {
 		
 		// Rotate image
 		if (TID != 0)
@@ -70,7 +70,7 @@ public:
 		vector<Rect> _haarRect;
 		face_cascade.detectMultiScale(frame_gray, _haarRect, 1.1, 2, 0 | CV_HAAR_SCALE_IMAGE, Size(30, 30));
 
-		// Update haarFaces
+		// Update Faces
 		for (int i = 0; i < _haarRect.size(); i++)
 		{
 			_haarRect[i] = Rect(_haarRect[i].tl().x + 0.17*_haarRect[i].width, _haarRect[i].tl().y + 0.17*_haarRect[i].height, 0.66*_haarRect[i].width, 0.7*_haarRect[i].height);
@@ -84,11 +84,11 @@ public:
 			resize(_haarCandidate, _haarCandidate, Size(cols, rows));
 
 			// Push
-			haarFaces.push_back(_haarCandidate);
-			haarRect.push_back(_haarRect[i]);
+			candidate.push_back(_haarCandidate);
+			candidateRect.push_back(_haarRect[i]);
 		}
 
-		//if (TID == 0) cout << haarFaces.size() << endl;
+		if (TID == 0) cout << candidate.size() << endl;
 		
 	}
 
