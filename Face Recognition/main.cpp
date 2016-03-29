@@ -34,37 +34,40 @@ int main(int argc, const char** argv)
 	//initializeDisplay();										// Display
 	//setMouseCallback("Face detection", CallBackFunc, NULL);	// Buttons
 
-	PrincipalComponentsAnalysis PCA("databasetest.txt", 50);    // PCA
+	PrincipalComponentsAnalysis PCA("databasetest.txt", 0.95);    // PCA
 	FaceDetector Detector("databasetest.txt");				    // Face Detector
 
 	// =============== Begin =====================
-		
-	Mat frame;
-
+	
 	// Initialize camera
 	capture.open(0);
 	capture.set(CV_CAP_PROP_FRAME_WIDTH, 640);
 	capture.set(CV_CAP_PROP_FRAME_HEIGHT, 480);
 
+	// Merge data
+	
+
 	// Begin multi thread
+	vector<Rect> combinedCandidateRect;
+	vector<string> combinedCandidateName;
 	omp_set_num_threads(3);
-    #pragma omp parallel shared(frame)
+    #pragma omp parallel shared(combinedCandidateRect, combinedCandidateName)
 	{
+		Mat frame;
+
 		// Get thread ID
 		int TID = omp_get_thread_num();			
 		while (true)
 		{
-			vector<Mat> candidate;			// Image of detected face
-			vector<Rect> candidateRect;     // Bounding box of detected face
-			vector<string> candidateName;   // Name of detected face
-
 			// Read in frame
-			#pragma omp single
-			{
-				capture >> frame;
-				flip(frame, frame, 1);
-			}
+			capture >> frame;
+			flip(frame, frame, 1);
 
+			// Image, Bounding box and name of detected face
+			vector<Mat> candidate;
+			vector<Rect> candidateRect;
+			vector<string> candidateName;
+			
 			// Run default detector on thread 0
 			if (TID == 0)
 			{					
@@ -76,32 +79,39 @@ int main(int argc, const char** argv)
 			}
 
 			// Rotate images and run detector on remaining threads
-			//if (TID == 1 || TID == 2)
-			//{
-			//	// Rotate input frame
-			//	Mat rotated;
-			//	warpAffine(frame, rotated, rotationMatrix[TID-1], frame.size(), INTER_CUBIC);
+			if (TID == 1 || TID == 2)
+			{
+				if (true)
+				{
+					Detector.detect(frame, candidate, candidateRect, TID);	// Detect faces
+					PCA.classify(candidate, candidateName);					// Classify faces
+				}
+			}
 
-			//	if (true)
-			//	{
-			//		detectFaces(rotated, haarFaces, haarRect);					// Detect faces
-			//		projectToEigenspace(haarFaces);								// Project to Eigenspace
-			//		getMatches(Face, haarFaces, matchID, distanceToBestMatch);	// Get ID of best matches
-			//	}
-			//}
-			
+			// Merge data
+			#pragma omp critical
+			{
+				combinedCandidateRect.insert(combinedCandidateRect.end(), candidateRect.begin(), candidateRect.end());
+				combinedCandidateName.insert(combinedCandidateName.end(), candidateName.begin(), candidateName.end());
+			}
+
 			// Wait for all threads
 			#pragma omp barrier
-
-			//#pragma omp flush(frame)
 
 			// Show result -- Why name change = hang ?
 			if (TID == 0)
 			{
-				updateDisplay(frame, candidateRect, candidateName);
+				cout << combinedCandidateRect.size() << " " << combinedCandidateName.size() << endl;
+				updateDisplay(frame, combinedCandidateRect, combinedCandidateName);
 				imshow("Result", frame);
 				waitKey(1);
 			}
+
+			// Wait for all threads
+            #pragma omp barrier
+
+			combinedCandidateRect.clear();
+			combinedCandidateName.clear();
 		}
 	}
 }

@@ -44,7 +44,7 @@ public:
 	
 	// Rotation matrix is wrt to capture width and height
 	rotationMatrix.push_back((Mat_<double>(2, 3) << 0.8660254037844387, 0.4999999999999999, -77.12812921102037, -0.4999999999999999, 0.8660254037844387, 192.1539030917347)); // 30
-	rotationMatrix.push_back((Mat_<double>(2, 3) << 0.8660254037844387, -0.4999999999999999, 162.8718707889796, 0.4999999999999999, 0.8660254037844387, -127.8460969082653)); // -45
+	rotationMatrix.push_back((Mat_<double>(2, 3) << 0.8660254037844387, -0.4999999999999999, 162.8718707889796, 0.4999999999999999, 0.8660254037844387, -127.8460969082653)); // -30
 	rotationMatrix.push_back((Mat_<double>(2, 3) << 6.123233995736766e-017, 1, 0, -1, 6.123233995736766e-017, 0)); // 90
 	rotationMatrix.push_back((Mat_<double>(2, 3) << 6.123233995736766e-017, -1, 0, 1, 6.123233995736766e-017, 0)); // -90
 	
@@ -54,7 +54,19 @@ public:
 	}
 
 	//=============================================================================================
-	void detect(Mat frame, vector<Mat>& haarFaces, vector<Rect>& haarRect) {
+	void detect(Mat frame, vector<Mat>& haarFaces, vector<Rect>& haarRect, int TID = 0) {
+		
+		// Rotate image
+		if (TID != 0)
+		{
+			frame = rotateImage(frame, TID);
+			if (TID == 2)
+			{
+				imshow("L", frame);
+				waitKey(1);
+			}
+
+		}
 
 		// Convert to grayscale
 		Mat frame_gray;
@@ -82,6 +94,14 @@ public:
 			haarRect.push_back(_haarRect[i]);
 		}
 		
+	}
+
+	//=============================================================================================
+	Mat rotateImage(Mat& frame, int TID) {
+
+		Mat rotatedFrame;
+		warpAffine(frame, rotatedFrame, rotationMatrix[TID - 1], frame.size(), INTER_CUBIC);
+		return rotatedFrame;
 	}
 
 	//=============================================================================================
