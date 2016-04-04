@@ -29,7 +29,7 @@ public:
 	int rows, cols;
 	
 	//=============================================================================================
-	FaceDetector(string configFileName) {
+	void initialize(string configFileName) {
 
 	// Open text file
 	string line;
@@ -86,10 +86,7 @@ public:
 			// Push
 			candidate.push_back(_haarCandidate);
 			candidateRect.push_back(_haarRect[i]);
-		}
-
-		if (TID == 0) cout << candidate.size() << endl;
-		
+		}		
 	}
 
 	//=============================================================================================

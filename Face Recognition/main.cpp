@@ -25,11 +25,16 @@ void CallBackFunc(int event, int x, int y, int flags, void* userdata);
 void updateDisplay(Mat& frame, const vector<Rect>& candidate, const vector<string>& candidateName, Mat& display);
 
 // Display buttons
-Rect recognition_button = Rect(680, 400, 400, 100);
-Rect exit_button		= Rect(680, 520, 400, 100);
+Rect detection_button		= Rect(680, 280, 400, 100);
+Rect recognition_button		= Rect(680, 400, 400, 100);
+Rect exit_button			= Rect(680, 520, 400, 100);
+Rect exit_subwindow_button	= Rect(0, 300, 100, 100);
+
+Mat save_button_image = imread("save_button.png");
 
 // State
 bool recognition = 0;
+bool detection = 0;
 
 // GUI display
 Mat display;
@@ -38,34 +43,63 @@ Mat display;
 int main(int argc, const char** argv)
 {
 	// ============== Initialize ================
+
+	// Test
+	/*PrincipalComponentsAnalysis PCAtest;
+	FaceDetector Detectortest;
+	PCAtest.initialize("databasetest.txt", 0.95);
+	Detectortest.initialize("databasetest.txt");
+
+	vector<Mat> cand;
+	vector<string> name;
+	Mat testim = imread("C:\\Users\\Haziq\\Documents\\Visual Studio 2013\\Projects\\Face Recognition\\Face Recognition\\DatabaseTest\\101.pgm", CV_LOAD_IMAGE_GRAYSCALE);
+	imshow("L", testim);
+	waitKey(0);
+	cand.push_back(testim);
+	PCAtest.classify(cand, name);
+
+	waitKey(0);*/
 	
 	// Display
 	initializeDisplay();
-
-	// Detector and Recognition classes -- Should I initialize INSIDE the parallel section ?
-	PrincipalComponentsAnalysis PCA("databasetest.txt", 0.95);
-	FaceDetector Detector("databasetest.txt");
 
 	// Camera
 	capture.open(0);
 	capture.set(CV_CAP_PROP_FRAME_WIDTH, 640);
 	capture.set(CV_CAP_PROP_FRAME_HEIGHT, 480);
 
-	// Shared container
+	// Global variables
 	vector<Rect> combinedCandidateRect;
 	vector<string> combinedCandidateName;
 
-	// =============== Begin =====================
-
-	// Begin multi threading
+	// Initialize number of threads
 	omp_set_num_threads(3);
-    #pragma omp parallel shared(combinedCandidateRect, combinedCandidateName)
+
+	// ========= Multi Thread Section ===========
+
+	// Generate threads
+	#pragma omp parallel shared(combinedCandidateRect, combinedCandidateName)
 	{
+		// Private variables
 		Mat frame;
+		PrincipalComponentsAnalysis PCA;
+		FaceDetector Detector;
 
 		// Get thread ID
 		int TID = omp_get_thread_num();
 
+		// Initialize
+		#pragma omp critical
+		{
+			PCA.initialize("databasetest.txt", 0.95);
+			Detector.initialize("databasetest.txt");
+			cout << "Thread " << TID << " initialized" << endl;
+		}
+
+		// Wait for all threads
+		#pragma omp barrier
+
+		// ========================= Begin ==============================
 		while (true)
 		{
 			// Read in frame
@@ -77,21 +111,27 @@ int main(int argc, const char** argv)
 			vector<Rect> candidateRect;
 			vector<string> candidateName;
 
-			// =============== Detection and Recognition =====================
+			// ========================= Recognition ==============================
 			if (recognition)
 			{			
 				// Run default detector on thread 0
 				if (TID == 0)
-				{					
-					Detector.detect(frame, candidate, candidateRect, TID);		// Detect faces
-					PCA.classify(candidate, candidateName);					// Classify faces
+				{	
+					// Detect faces
+					Detector.detect(frame, candidate, candidateRect, TID);
+
+					// Classify faces
+					PCA.classify(candidate, candidateName);					
 				}
 
 				// Rotate images and run detector on threads 1 and 2
 				if (TID == 1 || TID == 2)
 				{
-					Detector.detect(frame, candidate, candidateRect, TID);	// Detect faces
-					PCA.classify(candidate, candidateName);					// Classify faces
+					// Detect faces
+					Detector.detect(frame, candidate, candidateRect, TID);
+
+					// Classify faces
+					PCA.classify(candidate, candidateName);					
 				}
 
 				// Merge results - implicit barrier ?
@@ -102,7 +142,32 @@ int main(int argc, const char** argv)
 				}
 			}
 
-			// Wait for all threads - Why #single lag ?
+			// ================= Manual Detection on Thread 0 ======================
+			if (detection && TID == 0)
+			{
+				// Detect faces
+				Detector.detect(frame, candidate, candidateRect, TID);
+				
+				int window_count = candidate.size();
+				char window_name[40];
+				
+				// Show faces
+				for (int i = 0; i < window_count; i++)
+				{
+					Mat display;
+					sprintf(window_name, "Face %d", window_count);
+					cout << candidate[i].size() << endl;
+					vconcat(candidate[i], save_button_image, display);
+					imshow(window_name, display);
+				}
+
+				// Disable detector
+				detection = 0;
+			}
+
+			// =========================== Merge Results ===========================
+			
+			// Wait for all threads
 			#pragma omp barrier
 
 			// Show result
@@ -136,8 +201,10 @@ void initializeDisplay() {
 	Mat recognition_button_image	= imread("recognition_button.png");
 	Mat exit_button_image			= imread("exit_button.png");
 	Mat NTU_logo_image				= imread("NTU_Logo.png");
+	Mat detect_button_image			= imread("recognition_button.png");
 
 	// Initialize display
+	detect_button_image.copyTo(display(detection_button));
 	recognition_button_image.copyTo(display(recognition_button));
 	exit_button_image.copyTo(display(exit_button));
 	NTU_logo_image.copyTo(display(Rect(15, 20, 300, 100)));
@@ -173,7 +240,11 @@ void CallBackFunc(int event, int x, int y, int flags, void* userdata)
 {
 	if (event == EVENT_LBUTTONDOWN)
 	{
+		// Main window
 		if (recognition_button.contains(Point(x, y)))	recognition = !recognition;
+		if (detection_button.contains(Point(x, y)))	    detection = 1;
 		if (exit_button.contains(Point(x, y)))			exit(0);
+
+		// Sub window
 	}
 }
