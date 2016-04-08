@@ -21,23 +21,30 @@ using namespace cv;
 
 // Display functions
 void initializeDisplay();
-void CallBackFunc(int event, int x, int y, int flags, void* userdata);
-void updateDisplay(Mat& frame, const vector<Rect>& candidate, const vector<string>& candidateName, Mat& display);
+void CallBackFunc_mainWindow(int event, int x, int y, int flags, void* userdata);
+void CallBackFunc_subWindow(int event, int x, int y, int flags, void* userdata);
+void updateDisplay(Mat& frame, const vector<Rect>& candidate, const vector<string>& candidateName, vector<RotatedRect>& rtdCandidate, vector<string>& rtdCandidateName, Mat& display);
 
-// Display buttons
+// Not in use
+int captureWidth = 640;
+int captureHeight = 480;
+
+// Main window fake buttons
 Rect detection_button		= Rect(680, 280, 400, 100);
 Rect recognition_button		= Rect(680, 400, 400, 100);
 Rect exit_button			= Rect(680, 520, 400, 100);
-Rect exit_subwindow_button	= Rect(0, 300, 100, 100);
-
-Mat save_button_image = imread("save_button.png");
 
 // State
 bool recognition = 0;
 bool detection = 0;
+int globalCounter = 0;
 
 // GUI display
-Mat display;
+Mat display, sub_display;
+
+// Main window names
+string sub_window_name = "Detected Face";
+string main_window_name = "EE4902 Face Recognition";
 
 //=============================================================================================
 int main(int argc, const char** argv)
@@ -65,17 +72,19 @@ int main(int argc, const char** argv)
 
 	// Camera
 	capture.open(0);
-	capture.set(CV_CAP_PROP_FRAME_WIDTH, 640);
-	capture.set(CV_CAP_PROP_FRAME_HEIGHT, 480);
+	capture.set(CV_CAP_PROP_FRAME_WIDTH, captureWidth);
+	capture.set(CV_CAP_PROP_FRAME_HEIGHT, captureHeight);
 
 	// Global variables
 	vector<Rect> combinedCandidateRect;
+	vector<RotatedRect> combinedRtdCandidateRect;
 	vector<string> combinedCandidateName;
+	vector<string> combinedRtdCandidateName;
 
-	// Initialize number of threads
+	// Number of threads
 	omp_set_num_threads(3);
 
-	// ========= Multi Thread Section ===========
+	// ============= Multi Thread ================
 
 	// Generate threads
 	#pragma omp parallel shared(combinedCandidateRect, combinedCandidateName)
@@ -88,14 +97,14 @@ int main(int argc, const char** argv)
 		// Get thread ID
 		int TID = omp_get_thread_num();
 
-		// Initialize
+		// Initialize PCA and detector class
 		#pragma omp critical
 		{
 			PCA.initialize("databasetest.txt", 0.95);
-			Detector.initialize("databasetest.txt");
+			Detector.initialize("databasetest.txt", captureWidth, captureHeight);
 			cout << "Thread " << TID << " initialized" << endl;
 		}
-
+				
 		// Wait for all threads
 		#pragma omp barrier
 
@@ -111,54 +120,45 @@ int main(int argc, const char** argv)
 			vector<Rect> candidateRect;
 			vector<string> candidateName;
 
+			vector<Mat> rtdCandidate;
+			vector<RotatedRect> rtdCandidateRect;
+			vector<string> rtdCandidateName;
+
 			// ========================= Recognition ==============================
 			if (recognition)
 			{			
-				// Run default detector on thread 0
-				if (TID == 0)
-				{	
-					// Detect faces
-					Detector.detect(frame, candidate, candidateRect, TID);
 
-					// Classify faces
-					PCA.classify(candidate, candidateName);					
-				}
+				// Detect faces
+				Detector.detect(frame, candidate, candidateRect, rtdCandidate, rtdCandidateRect, TID);
 
-				// Rotate images and run detector on threads 1 and 2
-				if (TID == 1 || TID == 2)
-				{
-					// Detect faces
-					Detector.detect(frame, candidate, candidateRect, TID);
+				// Classify faces
+				PCA.classify(candidate, candidateName, rtdCandidate, rtdCandidateName);
 
-					// Classify faces
-					PCA.classify(candidate, candidateName);					
-				}
 
-				// Merge results - implicit barrier ?
+				// Merge results
 				#pragma omp critical
 				{
 					combinedCandidateRect.insert(combinedCandidateRect.end(), candidateRect.begin(), candidateRect.end());
 					combinedCandidateName.insert(combinedCandidateName.end(), candidateName.begin(), candidateName.end());
+					combinedRtdCandidateRect.insert(combinedRtdCandidateRect.end(), rtdCandidateRect.begin(), rtdCandidateRect.end());
+					combinedRtdCandidateName.insert(combinedRtdCandidateName.end(), rtdCandidateName.begin(), rtdCandidateName.end());
 				}
 			}
 
-			// ================= Manual Detection on Thread 0 ======================
+			// ======================== Manual Detection ===========================
 			if (detection && TID == 0)
 			{
 				// Detect faces
-				Detector.detect(frame, candidate, candidateRect, TID);
+				Detector.detect(frame, candidate, candidateRect, rtdCandidate, rtdCandidateRect, TID);
 				
-				int window_count = candidate.size();
-				char window_name[40];
-				
-				// Show faces
-				for (int i = 0; i < window_count; i++)
+				// Show only 1 Face
+				if (candidate.size() != 0)
 				{
-					Mat display;
-					sprintf(window_name, "Face %d", window_count);
-					cout << candidate[i].size() << endl;
-					vconcat(candidate[i], save_button_image, display);
-					imshow(window_name, display);
+					// Initialize display
+					namedWindow(sub_window_name, CV_WINDOW_NORMAL);
+					setMouseCallback(sub_window_name, CallBackFunc_subWindow);
+					sub_display = candidate[0];
+					imshow(sub_window_name, sub_display);
 				}
 
 				// Disable detector
@@ -173,8 +173,8 @@ int main(int argc, const char** argv)
 			// Show result
 			if (TID == 0)
 			{
-				updateDisplay(frame, combinedCandidateRect, combinedCandidateName, display);
-				imshow("EE4902 - Face Recognition", display);
+				updateDisplay(frame, combinedCandidateRect, combinedCandidateName, combinedRtdCandidateRect, combinedRtdCandidateName, display);
+				imshow(main_window_name, display);
 				waitKey(1);
 			}
 
@@ -185,7 +185,9 @@ int main(int argc, const char** argv)
 			#pragma omp single
 			{
 				combinedCandidateRect.clear();
+				combinedRtdCandidateRect.clear();
 				combinedCandidateName.clear();
+				combinedRtdCandidateName.clear();
 			}
 		}
 	}
@@ -197,31 +199,31 @@ void initializeDisplay() {
 	// Read in background image
 	display = imread("Background.png");	
 
-	// Read in button images
+	// Read in images for fake buttons
 	Mat recognition_button_image	= imread("recognition_button.png");
 	Mat exit_button_image			= imread("exit_button.png");
 	Mat NTU_logo_image				= imread("NTU_Logo.png");
 	Mat detect_button_image			= imread("recognition_button.png");
 
-	// Initialize display
+	// Position fake buttons
 	detect_button_image.copyTo(display(detection_button));
 	recognition_button_image.copyTo(display(recognition_button));
 	exit_button_image.copyTo(display(exit_button));
 	NTU_logo_image.copyTo(display(Rect(15, 20, 300, 100)));
 
 	// Create display
-	namedWindow("EE4902 - Face Recognition", CV_WINDOW_AUTOSIZE);
-	imshow("EE4902 - Face Recognition", display);
+	namedWindow(main_window_name, CV_WINDOW_AUTOSIZE);
+	imshow(main_window_name, display);
 
 	// Set mouse callback
-	setMouseCallback("EE4902 - Face Recognition", CallBackFunc, NULL);
+	setMouseCallback(main_window_name, CallBackFunc_mainWindow, NULL);
 	waitKey(1);
 }
 
 //=============================================================================================
-void updateDisplay(Mat& frame, const vector<Rect>& candidate, const vector<string>& candidateName, Mat& display) {
+void updateDisplay(Mat& frame, const vector<Rect>& candidate, const vector<string>& candidateName, vector<RotatedRect>& rtdCandidate, vector<string>& rtdCandidateName, Mat& display) {
 
-	// Loop through all candidates
+	// Display all candidates
 	for (int i = 0; i < candidate.size(); i++)
 	{
 		// Draw bounding box
@@ -231,20 +233,49 @@ void updateDisplay(Mat& frame, const vector<Rect>& candidate, const vector<strin
 		putText(frame, candidateName[i], candidate[i].tl(), CV_FONT_HERSHEY_SIMPLEX, 2, CV_RGB(255, 0, 0));
 	}
 
+	// Display all candidates
+	for (int i = 0; i < rtdCandidate.size(); i++)
+	{
+		// Get rtdRect coordinates
+		Point2f rect_points[4];
+		rtdCandidate[i].points(rect_points);
+
+		// Draw rotated bounding box
+		for (int j = 0; j < 4; j++)
+			line(frame, rect_points[j], rect_points[(j + 1) % 4], CV_RGB(255, 0, 0));
+
+		// Display ID
+		//putText(frame, candidateName[i], candidate[i].tl(), CV_FONT_HERSHEY_SIMPLEX, 2, CV_RGB(255, 0, 0));
+	}
+
 	// Copy to GUI
 	frame.copyTo(display(Rect(15, 140, 640, 480)));
 }
 
 //=============================================================================================
-void CallBackFunc(int event, int x, int y, int flags, void* userdata)
+void CallBackFunc_mainWindow(int event, int x, int y, int flags, void* userdata)
 {
 	if (event == EVENT_LBUTTONDOWN)
 	{
-		// Main window
 		if (recognition_button.contains(Point(x, y)))	recognition = !recognition;
 		if (detection_button.contains(Point(x, y)))	    detection = 1;
 		if (exit_button.contains(Point(x, y)))			exit(0);
+	}
+}
 
-		// Sub window
+//=============================================================================================
+void CallBackFunc_subWindow(int event, int x, int y, int flags, void* input)
+{	
+	if (event == EVENT_LBUTTONDOWN)
+	{
+		// Save image
+		if (event == EVENT_LBUTTONDOWN)
+		{
+			char newFace[40];
+			sprintf(newFace, "Face%d.png", globalCounter);
+			imwrite(newFace, sub_display);
+			globalCounter++;
+			destroyWindow(sub_window_name);
+		}
 	}
 }
