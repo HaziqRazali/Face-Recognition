@@ -82,20 +82,31 @@ public:
 			// Update Faces
 			for (int i = 0; i < _haarRect.size(); i++)
 			{
+				// Update size
 				_haarRect[i] = Rect(_haarRect[i].tl().x + 0.17*_haarRect[i].width, _haarRect[i].tl().y + 0.17*_haarRect[i].height, 0.66*_haarRect[i].width, 0.7*_haarRect[i].height);
 
-				Rect roi = _haarRect[i] & Rect(0, 0, 640, 480);
+				rectangle(frame, _haarRect[i], CV_RGB(255, 0, 0));
 
-				// Convert to Grayscale and resize before pushing
+				// Boundary
+				Rect roi = _haarRect[i] & Rect(0, 0, 640, 480);
+				
+				// Equalize
 				Mat _haarCandidate = frame_gray(roi);
 				equalizeHist(_haarCandidate, _haarCandidate);
 
+				// Resize
 				resize(_haarCandidate, _haarCandidate, Size(cols, rows));
 
 				// Push
 				rtdCandidate.push_back(_haarCandidate);
 				rtdcandidateRect.push_back(getRotatedRect(_haarRect[i],TID));
 			}
+
+			/*if (TID == 1)
+			{
+				imshow("Rotated", frame);
+				waitKey(1);
+			}*/
 		}
 
 		// Standard detector
@@ -116,6 +127,8 @@ public:
 
 				Rect roi = _haarRect[i] & Rect(0, 0, 640, 480);
 
+				rectangle(frame, _haarRect[i], CV_RGB(255, 0, 0));
+
 				// Convert to Grayscale and resize before pushing
 				Mat _haarCandidate = frame_gray(roi);
 				equalizeHist(_haarCandidate, _haarCandidate);
@@ -126,6 +139,9 @@ public:
 				candidate.push_back(_haarCandidate);
 				candidateRect.push_back(_haarRect[i]);
 			}
+
+			/*imshow("Normal", frame);
+			waitKey(1);*/
 		}
 	}
 
@@ -133,7 +149,7 @@ public:
 	Mat rotateImage(Mat& frame, int TID) {
 
 		Mat rotatedFrame;
-		warpAffine(frame, rotatedFrame, rotationMatrix[TID - 1], frame.size(), INTER_CUBIC);
+		warpAffine(frame, rotatedFrame, rotationMatrix[TID - 1], frame.size(), INTER_CUBIC); // Linear if want to optimize
 		return rotatedFrame;
 	}
 
@@ -151,9 +167,6 @@ public:
 		Mat coordinates = (Mat_<double>(3, 4) << corners[0].x, corners[1].x, corners[2].x, corners[3].x,
 												 corners[0].y, corners[1].y, corners[2].y, corners[3].y,
 														    1,            1,            1,            1);
-
-		// Get rotation Matrix -- Optimize
-		Mat r = getRotationMatrix2D(Point(captureWidth / 2, captureHeight / 2), -30, 1.0);
 
 		// Rotate
 		Mat result = invRotMtrx[TID-1] * coordinates;

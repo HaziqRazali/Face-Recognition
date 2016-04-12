@@ -100,8 +100,8 @@ int main(int argc, const char** argv)
 		// Initialize PCA and detector class
 		#pragma omp critical
 		{
-			PCA.initialize("databasetest.txt", 0.95);
-			Detector.initialize("databasetest.txt", captureWidth, captureHeight);
+			PCA.initialize("test.txt", 0.95);
+			Detector.initialize("test.txt", captureWidth, captureHeight);
 			cout << "Thread " << TID << " initialized" << endl;
 		}
 				
@@ -120,11 +120,13 @@ int main(int argc, const char** argv)
 			vector<Rect> candidateRect;
 			vector<string> candidateName;
 
+			// Image, Bounding box and name of rotated face
 			vector<Mat> rtdCandidate;
 			vector<RotatedRect> rtdCandidateRect;
 			vector<string> rtdCandidateName;
 
 			// ========================= Recognition ==============================
+
 			if (recognition)
 			{			
 
@@ -133,7 +135,6 @@ int main(int argc, const char** argv)
 
 				// Classify faces
 				PCA.classify(candidate, candidateName, rtdCandidate, rtdCandidateName);
-
 
 				// Merge results
 				#pragma omp critical
@@ -145,7 +146,8 @@ int main(int argc, const char** argv)
 				}
 			}
 
-			// ======================== Manual Detection ===========================
+			// ========================= For Training ============================
+
 			if (detection && TID == 0)
 			{
 				// Detect faces
@@ -159,6 +161,11 @@ int main(int argc, const char** argv)
 					setMouseCallback(sub_window_name, CallBackFunc_subWindow);
 					sub_display = candidate[0];
 					imshow(sub_window_name, sub_display);
+					char newFace[40];
+					sprintf(newFace, "Face%d.png", globalCounter);
+					imwrite(newFace, sub_display);
+					globalCounter++;
+					destroyWindow(sub_window_name);
 				}
 
 				// Disable detector
@@ -230,7 +237,7 @@ void updateDisplay(Mat& frame, const vector<Rect>& candidate, const vector<strin
 		rectangle(frame, candidate[i], CV_RGB(0, 0, 0));
 
 		// Display ID
-		putText(frame, candidateName[i], candidate[i].tl(), CV_FONT_HERSHEY_SIMPLEX, 2, CV_RGB(255, 0, 0));
+		putText(frame, candidateName[i], candidate[i].tl(), CV_FONT_HERSHEY_SIMPLEX, 1, CV_RGB(255, 0, 0));
 	}
 
 	// Display all candidates
@@ -243,9 +250,10 @@ void updateDisplay(Mat& frame, const vector<Rect>& candidate, const vector<strin
 		// Draw rotated bounding box
 		for (int j = 0; j < 4; j++)
 			line(frame, rect_points[j], rect_points[(j + 1) % 4], CV_RGB(255, 0, 0));
-
+		
+		//rtdCandidate[i].
 		// Display ID
-		//putText(frame, candidateName[i], candidate[i].tl(), CV_FONT_HERSHEY_SIMPLEX, 2, CV_RGB(255, 0, 0));
+		putText(frame, rtdCandidateName[i], rect_points[2], CV_FONT_HERSHEY_SIMPLEX, 1, CV_RGB(255, 0, 0));
 	}
 
 	// Copy to GUI
