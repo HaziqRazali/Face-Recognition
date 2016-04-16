@@ -78,9 +78,9 @@ int main(int argc, const char** argv)
 	// Global variables
 	vector<Rect> combinedCandidateRect;
 	vector<RotatedRect> combinedRtdCandidateRect;
+
 	vector<string> combinedCandidateName;
 	vector<string> combinedRtdCandidateName;
-
 	// Number of threads
 	omp_set_num_threads(3);
 
@@ -210,7 +210,7 @@ void initializeDisplay() {
 	Mat recognition_button_image	= imread("recognition_button.png");
 	Mat exit_button_image			= imread("exit_button.png");
 	Mat NTU_logo_image				= imread("NTU_Logo.png");
-	Mat detect_button_image			= imread("recognition_button.png");
+	Mat detect_button_image			= imread("detect_button.png");
 
 	// Position fake buttons
 	detect_button_image.copyTo(display(detection_button));
