@@ -1,3 +1,3 @@
 # Face-Recognition
 
-Readme to be added soon lol
+Readme to be added soon
